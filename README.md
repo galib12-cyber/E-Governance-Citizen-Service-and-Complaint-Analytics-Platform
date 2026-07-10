@@ -127,9 +127,9 @@ All tables are connected using **Primary Keys** and **Foreign Keys** to maintain
 
 The database follows **Third Normal Form (3NF)**.
 
-- ✔ First Normal Form (1NF)
-- ✔ Second Normal Form (2NF)
-- ✔ Third Normal Form (3NF)
+-  First Normal Form (1NF)
+-  Second Normal Form (2NF)
+-  Third Normal Form (3NF)
 
 This minimizes redundancy and ensures data consistency.
 
