@@ -1,5 +1,5 @@
 
--- SECTION 0 : CLEANUP (drop everything if re-running)
+-- Part 0 : CLEANUP (drop everything if re-running)
 
 BEGIN
 FOR t IN (SELECT table_name FROM user_tables WHERE table_name IN (
@@ -16,7 +16,7 @@ END LOOP;
 END;
 /
 
--- SECTION 1 : SEQUENCES (replaces AUTO_INCREMENT)
+-- Part 1 : SEQUENCES (replaces AUTO_INCREMENT)
 
 CREATE SEQUENCE seq_citizen START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
 CREATE SEQUENCE seq_department START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
@@ -28,7 +28,7 @@ CREATE SEQUENCE seq_history START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
 CREATE SEQUENCE seq_feedback START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
 
 
--- SECTION 2 : TABLE CREATION (3NF Normalized)
+-- Part 2 : TABLE CREATION (3NF Normalized)
 
 -- 2.1 CITIZENS
 CREATE TABLE Citizens (
@@ -152,7 +152,7 @@ CONSTRAINT fk_fb_citizen FOREIGN KEY (citizen_id) REFERENCES Citizens(citizen_id
 );
 
 
--- SECTION 3 : AUTO-INCREMENT TRIGGERS
+-- Part 3 : AUTO-INCREMENT TRIGGERS
 
 CREATE OR REPLACE TRIGGER trg_ai_citizen 
 BEFORE INSERT ON Citizens FOR EACH ROW 
@@ -227,7 +227,7 @@ END;
 /
 
 
--- SECTION 4 : SAMPLE DATA (≥10 rows per table)
+-- Part 4 : SAMPLE DATA (≥10 rows per table)
 
 -- ── 4.1 Citizens ─────────────────────────────────────────────
 INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Rahim Uddin','rahim@email.com','01711223344','House 5, Road 3, Chittagong','Pass@123_hashed',TO_DATE('2025-01-10','YYYY-MM-DD'));
@@ -339,7 +339,7 @@ INSERT INTO Feedback (complaint_id,citizen_id,rating,comment,feedback_date) VALU
 COMMIT;
 
 
--- SECTION 5 : SINGLE-TABLE QUERIES (10)
+-- Part 5 : SINGLE-TABLE QUERIES (10)
 
 -- Q1: All active citizens ordered by registration date (latest first) 
 SELECT citizen_id, name, email, phone, registration_date
@@ -407,7 +407,7 @@ WHERE status = 'resolved'
 AND resolved_date IS NOT NULL;
 
 
--- SECTION 6 : MULTI-TABLE JOIN QUERIES (5)
+-- Part 6 : MULTI-TABLE JOIN QUERIES (5)
 
 -- J1: Full complaint report with citizen name and department 
 SELECT c.complaint_id,
@@ -465,7 +465,7 @@ JOIN Departments d ON d.department_id = c.department_id
 ORDER BY f.rating DESC;
 
 
--- SECTION 7 : SUBQUERIES (all types)
+-- Part 7 : SUBQUERIES (all types)
 
 -- SQ1: Scalar subquery – citizens with more complaints than average 
 SELECT name, email,
@@ -533,7 +533,7 @@ WHERE f2.complaint_id = Feedback.complaint_id
 );
 
 
--- SECTION 8 : VIEWS
+-- Part 8 : VIEWS
 
 -- V1: Analytics summary view
 CREATE OR REPLACE VIEW v_analytics_summary AS 
@@ -580,7 +580,7 @@ JOIN Citizens ci ON ci.citizen_id = f.citizen_id
 JOIN Departments d ON d.department_id = c.department_id;
 
 
--- SECTION 9 : STORED PROCEDURES (PL/SQL)
+-- Part 9 : STORED PROCEDURES (PL/SQL)
 
 -- SP1: Submit a new complaint
 CREATE OR REPLACE PROCEDURE sp_submit_complaint ( 
@@ -668,7 +668,7 @@ END sp_dept_performance_report;
 /
 
 
--- SECTION 10 : FUNCTIONS (PL/SQL)
+-- Part 10 : FUNCTIONS (PL/SQL)
 
 -- FN1: Total complaints for a given citizen
 CREATE OR REPLACE FUNCTION fn_citizen_complaint_count ( 
@@ -721,7 +721,7 @@ END fn_status_label;
 /
 
 
--- SECTION 11 : TRIGGERS (Business-Logic)
+-- Part 11 : TRIGGERS (Business-Logic)
 
 -- T3: BEFORE INSERT on Complaints
 -- Auto-escalate priority to 'critical' for emergency keywords 
@@ -760,7 +760,7 @@ END trg_feedback_audit;
 /
 
 
--- SECTION 12 : ADVANCED QUERIES
+-- Part 12 : ADVANCED QUERIES
 
 
 -- AQ1: Department with the highest number of complaints 
@@ -817,7 +817,7 @@ GROUP BY TO_CHAR(created_date,'MM'), TO_CHAR(created_date,'Month')
 ORDER BY TO_CHAR(created_date,'MM');
 
 
--- SECTION 13 : DEMO / VERIFICATION SELECTS
+-- Part 13 : DEMO / VERIFICATION SELECTS
 
 -- Verify analytics summary
 SELECT * FROM v_analytics_summary;
