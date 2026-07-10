@@ -1,0 +1,848 @@
+
+-- SECTION 0 : CLEANUP (drop everything if re-running)
+
+BEGIN
+FOR t IN (SELECT table_name FROM user_tables WHERE table_name IN (
+'FEEDBACK','COMPLAINT_STATUS_HISTORY', 'COMPLAINTS','APPLICATIONS','SERVICES', 'OFFICERS','DEPARTMENTS','CITIZENS'))
+LOOP
+EXECUTE IMMEDIATE 'DROP TABLE ' || t.table_name || ' CASCADE CONSTRAINTS'; 
+END LOOP;
+
+FOR s IN (SELECT sequence_name FROM user_sequences WHERE sequence_name IN (
+'SEQ_CITIZEN','SEQ_DEPARTMENT','SEQ_OFFICER', 'SEQ_SERVICE','SEQ_APPLICATION','SEQ_COMPLAINT', 'SEQ_HISTORY','SEQ_FEEDBACK'))
+LOOP
+EXECUTE IMMEDIATE 'DROP SEQUENCE ' || s.sequence_name; 
+END LOOP;
+END;
+/
+
+-- SECTION 1 : SEQUENCES (replaces AUTO_INCREMENT)
+
+CREATE SEQUENCE seq_citizen START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_department START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_officer START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_service START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_application START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_complaint START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_history START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+CREATE SEQUENCE seq_feedback START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE;
+
+
+-- SECTION 2 : TABLE CREATION (3NF Normalized)
+
+-- 2.1 CITIZENS
+CREATE TABLE Citizens (
+citizen_id NUMBER(10) NOT NULL, 
+name VARCHAR2(100) NOT NULL,
+email VARCHAR2(150) NOT NULL,
+phone VARCHAR2(15) NOT NULL,
+address VARCHAR2(500) NOT NULL,
+password VARCHAR2(255) NOT NULL,
+registration_date DATE DEFAULT SYSDATE NOT NULL, 
+is_active NUMBER(1) DEFAULT 1 NOT NULL,
+CONSTRAINT pk_citizen PRIMARY KEY (citizen_id), 
+CONSTRAINT uq_citizen_email UNIQUE (email),
+CONSTRAINT chk_citizen_active CHECK (is_active IN (0,1)), 
+CONSTRAINT chk_phone CHECK (REGEXP_LIKE(phone, '^[0-9]{10,15}$'))
+);
+
+-- 2.2 DEPARTMENTS
+CREATE TABLE Departments (
+department_id NUMBER(10) NOT NULL, 
+department_name VARCHAR2(150) NOT NULL, 
+officer_name VARCHAR2(100) NOT NULL, 
+contact VARCHAR2(15) NOT NULL,
+email VARCHAR2(150),
+location VARCHAR2(200),
+CONSTRAINT pk_department PRIMARY KEY (department_id), 
+CONSTRAINT uq_department_name UNIQUE (department_name)
+);
+
+-- 2.3 OFFICERS
+CREATE TABLE Officers (
+officer_id NUMBER(10) NOT NULL, 
+department_id NUMBER(10) NOT NULL, 
+name VARCHAR2(100) NOT NULL,
+email VARCHAR2(150) NOT NULL, 
+password VARCHAR2(255) NOT NULL,
+role VARCHAR2(10) DEFAULT 'officer' NOT NULL, 
+is_active NUMBER(1) DEFAULT 1 NOT NULL,
+CONSTRAINT pk_officer PRIMARY KEY (officer_id), 
+CONSTRAINT uq_officer_email UNIQUE (email),
+CONSTRAINT chk_officer_role CHECK (role IN ('officer','admin')),
+CONSTRAINT chk_officer_active CHECK (is_active IN (0,1)), 
+CONSTRAINT fk_officer_dept FOREIGN KEY (department_id) REFERENCES Departments(department_id)
+);
+
+-- 2.4 SERVICES
+CREATE TABLE Services (
+service_id NUMBER(10) NOT NULL, 
+department_id NUMBER(10) NOT NULL, 
+service_name VARCHAR2(200) NOT NULL, 
+description VARCHAR2(1000),
+fee NUMBER(10,2) DEFAULT 0 NOT NULL,
+duration_days NUMBER(5) DEFAULT 7 NOT NULL, 
+is_active NUMBER(1) DEFAULT 1 NOT NULL,
+CONSTRAINT pk_service PRIMARY KEY (service_id), 
+CONSTRAINT chk_service_fee CHECK (fee >= 0),
+CONSTRAINT chk_service_active CHECK (is_active IN (0,1)), 
+CONSTRAINT fk_service_dept FOREIGN KEY (department_id) REFERENCES Departments(department_id)
+);
+
+-- 2.5 APPLICATIONS
+CREATE TABLE Applications ( 
+application_id NUMBER(10) NOT NULL, 
+citizen_id NUMBER(10) NOT NULL, 
+service_id NUMBER(10) NOT NULL,
+apply_date DATE DEFAULT SYSDATE NOT NULL,
+status VARCHAR2(20) DEFAULT 'pending' NOT NULL, 
+notes VARCHAR2(1000),
+CONSTRAINT pk_application PRIMARY KEY (application_id), 
+CONSTRAINT chk_app_status CHECK (status IN ('pending','processing','approved','rejected')), 
+CONSTRAINT fk_app_citizen FOREIGN KEY (citizen_id) REFERENCES Citizens(citizen_id) ON DELETE CASCADE, 
+CONSTRAINT fk_app_service FOREIGN KEY (service_id) REFERENCES Services(service_id)
+);
+
+-- 2.6 COMPLAINTS
+CREATE TABLE Complaints (
+complaint_id NUMBER(10) NOT NULL, 
+citizen_id NUMBER(10) NOT NULL, 
+department_id NUMBER(10) NOT NULL, 
+title VARCHAR2(255) NOT NULL,
+description CLOB NOT NULL,
+priority VARCHAR2(10) DEFAULT 'medium' NOT NULL, 
+status VARCHAR2(20) DEFAULT 'submitted' NOT NULL, 
+created_date DATE DEFAULT SYSDATE NOT NULL, 
+resolved_date DATE,
+CONSTRAINT pk_complaint PRIMARY KEY (complaint_id), 
+CONSTRAINT chk_comp_priority CHECK (priority IN ('low','medium','high','critical')), 
+CONSTRAINT chk_comp_status CHECK (status IN ('submitted','assigned','in_progress','resolved','closed','rejected')), 
+CONSTRAINT chk_comp_resolved CHECK (resolved_date IS NULL OR resolved_date >= created_date), 
+CONSTRAINT fk_comp_citizen FOREIGN KEY (citizen_id) REFERENCES Citizens(citizen_id) ON DELETE CASCADE, 
+CONSTRAINT fk_comp_dept FOREIGN KEY (department_id) REFERENCES Departments(department_id)
+);
+
+-- 2.7 COMPLAINT STATUS HISTORY
+CREATE TABLE Complaint_Status_History ( 
+history_id NUMBER(10) NOT NULL, 
+complaint_id NUMBER(10) NOT NULL, 
+officer_id NUMBER(10) NOT NULL, 
+old_status VARCHAR2(50) NOT NULL, 
+new_status VARCHAR2(50) NOT NULL, 
+remarks VARCHAR2(1000),
+update_time DATE DEFAULT SYSDATE NOT NULL,
+CONSTRAINT pk_history PRIMARY KEY (history_id), 
+CONSTRAINT fk_hist_complaint FOREIGN KEY (complaint_id) REFERENCES Complaints(complaint_id) ON DELETE CASCADE,
+CONSTRAINT fk_hist_officer FOREIGN KEY (officer_id) REFERENCES Officers(officer_id)
+);
+
+-- 2.8 FEEDBACK
+CREATE TABLE Feedback (
+feedback_id NUMBER(10) NOT NULL, 
+complaint_id NUMBER(10) NOT NULL, 
+citizen_id NUMBER(10) NOT NULL, 
+rating NUMBER(1) NOT NULL,
+comment VARCHAR2(1000),
+feedback_date DATE DEFAULT SYSDATE NOT NULL, 
+CONSTRAINT pk_feedback PRIMARY KEY (feedback_id), 
+CONSTRAINT uq_feedback_comp UNIQUE (complaint_id), 
+CONSTRAINT chk_rating CHECK (rating BETWEEN 1 AND 5), 
+CONSTRAINT fk_fb_complaint FOREIGN KEY (complaint_id) REFERENCES Complaints(complaint_id) ON DELETE CASCADE,
+CONSTRAINT fk_fb_citizen FOREIGN KEY (citizen_id) REFERENCES Citizens(citizen_id) ON DELETE CASCADE
+);
+
+
+-- SECTION 3 : AUTO-INCREMENT TRIGGERS
+
+CREATE OR REPLACE TRIGGER trg_ai_citizen 
+BEFORE INSERT ON Citizens FOR EACH ROW 
+BEGIN
+IF :NEW.citizen_id IS NULL THEN
+SELECT seq_citizen.NEXTVAL INTO :NEW.citizen_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_department 
+BEFORE INSERT ON Departments FOR EACH ROW 
+BEGIN
+IF :NEW.department_id IS NULL THEN
+SELECT seq_department.NEXTVAL INTO :NEW.department_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_officer 
+BEFORE INSERT ON Officers FOR EACH ROW 
+BEGIN
+IF :NEW.officer_id IS NULL THEN
+SELECT seq_officer.NEXTVAL INTO :NEW.officer_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_service 
+BEFORE INSERT ON Services FOR EACH ROW 
+BEGIN
+IF :NEW.service_id IS NULL THEN
+SELECT seq_service.NEXTVAL INTO :NEW.service_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_application 
+BEFORE INSERT ON Applications FOR EACH ROW 
+BEGIN
+IF :NEW.application_id IS NULL THEN
+SELECT seq_application.NEXTVAL INTO :NEW.application_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_complaint 
+BEFORE INSERT ON Complaints FOR EACH ROW 
+BEGIN
+IF :NEW.complaint_id IS NULL THEN
+SELECT seq_complaint.NEXTVAL INTO :NEW.complaint_id FROM DUAL; 
+END IF;
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_history
+BEFORE INSERT ON Complaint_Status_History FOR EACH ROW 
+BEGIN
+IF :NEW.history_id IS NULL THEN
+SELECT seq_history.NEXTVAL INTO :NEW.history_id FROM DUAL;
+END IF; 
+END;
+/
+
+CREATE OR REPLACE TRIGGER trg_ai_feedback 
+BEFORE INSERT ON Feedback FOR EACH ROW 
+BEGIN
+IF :NEW.feedback_id IS NULL THEN
+SELECT seq_feedback.NEXTVAL INTO :NEW.feedback_id FROM DUAL; 
+END IF;
+END;
+/
+
+
+-- SECTION 4 : SAMPLE DATA (≥10 rows per table)
+
+-- ── 4.1 Citizens ─────────────────────────────────────────────
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Rahim Uddin','rahim@email.com','01711223344','House 5, Road 3, Chittagong','Pass@123_hashed',TO_DATE('2025-01-10','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Nasrin Akter','nasrin@email.com','01812334455','Flat 2B, Halishahar, CTG','Pass@123_hashed',TO_DATE('2025-02-14','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Karim Hossain','karim@email.com','01913445566','Agrabad, Chittagong','Pass@123_hashed',TO_DATE('2025-03-05','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Fatema Begum','fatema@email.com','01614556677','Panchlaish, Chittagong','Pass@123_hashed',TO_DATE('2025-03-20','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Jamal Ahmed','jamal@email.com','01515667788','CDA Avenue, Chittagong','Pass@123_hashed',TO_DATE('2025-04-01','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Sultana Parvin','sultana@email.com','01716778899','Bayazid Bostami, CTG','Pass@123_hashed',TO_DATE('2025-04-15','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Moinul Islam','moinul@email.com','01817889900','Nasirabad, Chittagong','Pass@123_hashed',TO_DATE('2025-05-02','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Roksana Khanam','roksana@email.com','01918990011','Khulshi, Chittagong','Pass@123_hashed',TO_DATE('2025-05-18','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Tariq Mahmud','tariq@email.com','01619001122','Muradpur, Chittagong','Pass@123_hashed',TO_DATE('2025-06-01','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Shirin Sultana','shirin@email.com','01520112233','Chawk Bazar, Chittagong','Pass@123_hashed',TO_DATE('2025-06-10','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Habibur Rahman','habib@email.com','01721223344','Pahartali, Chittagong','Pass@123_hashed',TO_DATE('2025-07-04','YYYY-MM-DD'));
+INSERT INTO Citizens (name,email,phone,address,password,registration_date) VALUES ('Laila Noor','laila@email.com','01622334455','Dewanhat, Chittagong','Pass@123_hashed',TO_DATE('2025-07-20','YYYY-MM-DD'));
+COMMIT;
+
+-- ── 4.2 Departments ──────────────────────────────────────────
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Water & Sewerage Authority','Md. Shahidullah','031-711001','cwasa@gov.bd','Dampara, Chittagong');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Roads & Transport Department','Engr. Rafiqul Islam','031-611002','roads@gov.bd','CDA, Chittagong');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Electricity Supply Board','Md. Anisur Rahman','031-511003','pbs@gov.bd','Agrabad, Chittagong');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Public Health Department','Dr. Meherun Nessa','031-411004','health@gov.bd','Medical College Rd');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Civil Registry & NID Services','Md. Kamrul Hasan','031-311005','nid@gov.bd','Circuit House, CTG');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Land & Revenue Department','Md. Zakir Hossain','031-211006','land@gov.bd','DC Office, CTG');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Education Department','Prof. Nurul Islam','031-111007','edu@gov.bd','Jubilee Road, CTG');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Social Welfare Department','Ms. Hosne Ara','031-811008','social@gov.bd','Nizam Road, CTG');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Environment Department','Engr. Saiful Azam','031-911009','env@gov.bd','Kaptai Road, CTG');
+INSERT INTO Departments (department_name,officer_name,contact,email,location) VALUES ('Fire Service & Civil Defence','Md. Jashim Uddin','031-000010','fire@gov.bd','Station Road, CTG');
+COMMIT;
+
+-- ── 4.3 Officers ─────────────────────────────────────────────
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (1,'Md. Shahidullah','shahid@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (2,'Engr. Rafiqul','rafiq@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (3,'Md. Anisur','anisur@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (4,'Dr. Meherun','meherun@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (5,'Md. Kamrul','kamrul@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (6,'Md. Zakir','zakir@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (7,'Prof. Nurul','nurul@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (8,'Ms. Hosne Ara','hosne@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (9,'Engr. Saiful','saiful@gov.bd','Admin@2026','officer');
+INSERT INTO Officers (department_id,name,email,password,role) VALUES (1,'Admin Superuser','admin@gov.bd','Admin@2026','admin');
+COMMIT;
+
+-- ── 4.4 Services ─────────────────────────────────────────────
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (1,'New Water Connection','Apply for new residential water supply connection',500,14); 
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (1,'Water Bill Payment','Online payment of monthly water bills',0,1);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (2,'Road Repair Request','Request pothole or road surface repair',0,30);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (3,'Electricity Connection','New residential electricity connection application',800,21);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (3,'Load Enhancement','Request increase in sanctioned electrical load',300,15);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (4,'Health Certificate','Apply for fitness/health certificate',200,7);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (5,'NID Correction','Request correction of national ID information',0,30);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (5,'Voter Registration','New voter registration and enrollment',0,21);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (6,'Land Mutation','Application for land ownership mutation/transfer',1000,45);
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (7,'School Enrollment Help','Assistance with government school enrollment',0,7); 
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (8,'Social Safety Net Apply','Apply for government social protection benefits',0,60); 
+INSERT INTO Services (department_id,service_name,description,fee,duration_days) VALUES (9,'Environment Clearance','Apply for environmental clearance certificate',2000,30); 
+COMMIT;
+
+-- ── 4.5 Applications ─────────────────────────────────────────
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (1,1,TO_DATE('2025-08-01','YYYY-MM-DD'),'approved','Connection installed at House 5, Road 3');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (2,6,TO_DATE('2025-08-05','YYYY-MM-DD'),'processing','Documents under verification'); 
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (3,9,TO_DATE('2025-08-10','YYYY-MM-DD'),'pending',NULL);
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (4,7,TO_DATE('2025-08-12','YYYY-MM-DD'),'approved','NID corrected, new card dispatched');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (5,4,TO_DATE('2025-08-15','YYYY-MM-DD'),'approved','Connection approved. Meter installed');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (6,11,TO_DATE('2025-09-01','YYYY-MM-DD'),'pending','Awaiting field verification');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (7,8,TO_DATE('2025-09-05','YYYY-MM-DD'),'processing','Voter roll check ongoing'); 
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (8,2,TO_DATE('2025-09-10','YYYY-MM-DD'),'approved','Bill payment confirmed');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (9,5,TO_DATE('2025-09-15','YYYY-MM-DD'),'rejected','Load limit already at maximum for zone');
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (10,3,TO_DATE('2025-09-20','YYYY-MM-DD'),'pending',NULL);
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (11,12,TO_DATE('2025-10-01','YYYY-MM-DD'),'processing','Site inspection scheduled'); 
+INSERT INTO Applications (citizen_id,service_id,apply_date,status,notes) VALUES (12,10,TO_DATE('2025-10-05','YYYY-MM-DD'),'approved','Enrollment assistance provided');
+COMMIT;
+
+-- ── 4.6 Complaints ─────────────────────────────────────────── 
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (1,1,'No water supply for 3 days','Area has no water since Monday morning','high','resolved', TO_DATE('2025-08-03 09:00:00','YYYY-MM-DD HH24:MI:SS'),TO_DATE('2025-08-07 15:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (2,2,'Large pothole on CDA Avenue','Dangerous pothole causing accidents near Hospital','critical','in_progress', TO_DATE('2025-08-05 10:30:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (3,3,'Frequent power cuts every evening','Load shedding 3-4 hours daily in Agrabad area','high','assigned', TO_DATE('2025-08-07 14:00:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (4,5,'NID card not received after 60 days','Applied 60 days ago; no update received','medium','resolved', TO_DATE('2025-08-10 11:00:00','YYYY-MM-DD HH24:MI:SS'),TO_DATE('2025-08-20 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (5,4,'Hospital dirty, no sanitation','Chittagong General Hospital wards very dirty','high','submitted', TO_DATE('2025-08-12 08:00:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (6,6,'Land mutation pending for 6 months','Submitted all documents but no action taken','medium','in_progress', TO_DATE('2025-09-01 09:30:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (7,1,'Sewage overflow near school','Sewage overflowing on Muradpur school road','critical','resolved', TO_DATE('2025-09-03 07:00:00','YYYY-MM-DD HH24:MI:SS'),TO_DATE('2025-09-10 12:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (8,2,'Street lights not working for weeks','Eight street lights broken on Khulshi road','low','submitted', TO_DATE('2025-09-05 20:00:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (9,7,'Teacher absent for 2 months','Class teacher absent without replacement','high','assigned', TO_DATE('2025-09-08 10:00:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (10,9,'Illegal factory dumping in canal','Chemical waste dumped into Halda River canal','critical','in_progress', TO_DATE('2025-09-12 08:30:00','YYYY-MM-DD HH24:MI:SS'),NULL);
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (11,3,'Electric meter burning smell','Strong burning smell from electric meter box','critical','resolved', TO_DATE('2025-09-14 06:00:00','YYYY-MM-DD HH24:MI:SS'),TO_DATE('2025-09-15 10:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaints (citizen_id,department_id,title,description,priority,status,created_date,resolved_date) VALUES (12,8,'Social benefit payment delayed','Allowance not received for last 2 months','medium','submitted', TO_DATE('2025-10-01 11:00:00','YYYY-MM-DD HH24:MI:SS'),NULL); 
+COMMIT;
+
+-- ── 4.7 Complaint_Status_History ───────────────────────────── 
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (1,1,'submitted','assigned','Assigned to field team',TO_DATE('2025-08-03 10:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (1,1,'assigned','in_progress','Repair team dispatched',TO_DATE('2025-08-05 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (1,1,'in_progress','resolved','Main pipe repaired and supply restored',TO_DATE('2025-08-07 15:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (2,2,'submitted','assigned','Assigned to road maintenance unit',TO_DATE('2025-08-06 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (2,2,'assigned','in_progress','Crew on site, work in progress',TO_DATE('2025-08-10 11:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (3,3,'submitted','assigned','Escalated to load distribution',TO_DATE('2025-08-08 10:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (4,5,'submitted','assigned','Card production check initiated',TO_DATE('2025-08-11 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (4,5,'assigned','resolved','Card dispatched via courier',TO_DATE('2025-08-20 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (7,1,'submitted','assigned','Emergency crew assigned',TO_DATE('2025-09-03 08:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (7,1,'assigned','resolved','Sewage line cleared and disinfected',TO_DATE('2025-09-10 12:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (9,7,'submitted','assigned','Investigation notice issued to school',TO_DATE('2025-09-09 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (11,3,'submitted','in_progress','Emergency team on site',TO_DATE('2025-09-14 07:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Complaint_Status_History (complaint_id,officer_id,old_status,new_status,remarks,update_time) VALUES (11,3,'in_progress','resolved','Meter replaced, safe now',TO_DATE('2025-09-15 10:00:00','YYYY-MM-DD HH24:MI:SS'));
+COMMIT;
+
+-- ── 4.8 Feedback ─────────────────────────────────────────────
+INSERT INTO Feedback (complaint_id,citizen_id,rating,comment,feedback_date) VALUES (1,1,4,'Issue resolved, but took longer than expected',TO_DATE('2025-08-08 10:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Feedback (complaint_id,citizen_id,rating,comment,feedback_date) VALUES (4,4,5,'Very quick resolution. Excellent service!',TO_DATE('2025-08-21 11:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Feedback (complaint_id,citizen_id,rating,comment,feedback_date) VALUES (7,7,5,'Emergency response was fast. Great work!',TO_DATE('2025-09-11 09:00:00','YYYY-MM-DD HH24:MI:SS'));
+INSERT INTO Feedback (complaint_id,citizen_id,rating,comment,feedback_date) VALUES (11,11,3,'Resolved but took overnight. Needed faster response',TO_DATE('2025-09-16 08:00:00','YYYY-MM-DD HH24:MI:SS'));
+COMMIT;
+
+
+-- SECTION 5 : SINGLE-TABLE QUERIES (10)
+
+-- Q1: All active citizens ordered by registration date (latest first) 
+SELECT citizen_id, name, email, phone, registration_date
+FROM Citizens 
+WHERE is_active = 1
+ORDER BY registration_date DESC;
+
+-- Q2: Monthly citizen registration count 
+SELECT TO_CHAR(registration_date,'YYYY') AS yr,
+TO_CHAR(registration_date,'MM') AS mon, 
+TO_CHAR(registration_date,'Month') AS month_name, 
+COUNT(*) AS registrations
+FROM Citizens
+GROUP BY TO_CHAR(registration_date,'YYYY'), TO_CHAR(registration_date,'MM'), TO_CHAR(registration_date,'Month')
+ORDER BY yr, mon;
+
+-- Q3: Complaint count grouped by status 
+SELECT status, COUNT(*) AS total_complaints 
+FROM Complaints 
+GROUP BY status 
+ORDER BY total_complaints DESC;
+
+-- Q4: Unresolved complaints older than 7 days 
+SELECT complaint_id, title, priority, status, created_date, 
+TRUNC(SYSDATE - created_date) AS days_pending 
+FROM Complaints 
+WHERE status NOT IN ('resolved','closed') 
+AND SYSDATE - created_date > 7 
+ORDER BY days_pending DESC;
+
+-- Q5: Active services sorted by fee descending 
+SELECT service_id, service_name, fee, duration_days 
+FROM Services 
+WHERE is_active = 1 
+ORDER BY fee DESC;
+
+-- Q6: Complaint count per priority level 
+SELECT priority, COUNT(*) AS total 
+FROM Complaints 
+GROUP BY priority 
+ORDER BY DECODE(priority,'critical',1,'high',2,'medium',3,'low',4);
+
+-- Q7: Feedback details sorted by rating descending
+SELECT feedback_id, complaint_id, rating, comment, feedback_date 
+FROM Feedback 
+ORDER BY rating DESC;
+
+-- Q8: Active officers sorted by role then name 
+SELECT officer_id, name, email, role
+FROM Officers 
+WHERE is_active = 1 
+ORDER BY role DESC, name;
+
+-- Q9: Rejected applications in the last 90 days 
+SELECT application_id, citizen_id, service_id, apply_date, notes 
+FROM Applications 
+WHERE status = 'rejected' 
+AND apply_date >= SYSDATE - 90;
+
+-- Q10: Average resolution time in hours for resolved complaints 
+SELECT ROUND(AVG((resolved_date - created_date) * 24), 2) 
+AS avg_resolution_hours 
+FROM Complaints 
+WHERE status = 'resolved' 
+AND resolved_date IS NOT NULL;
+
+
+-- SECTION 6 : MULTI-TABLE JOIN QUERIES (5)
+
+-- J1: Full complaint report with citizen name and department 
+SELECT c.complaint_id,
+ci.name AS citizen_name, 
+d.department_name,
+c.title, c.priority, c.status, c.created_date, c.resolved_date 
+FROM Complaints c 
+JOIN Citizens ci ON ci.citizen_id = c.citizen_id 
+JOIN Departments d ON d.department_id = c.department_id 
+ORDER BY c.created_date DESC;
+
+-- J2: Service applications with citizen, service and department info 
+SELECT a.application_id,
+ci.name AS citizen_name, 
+s.service_name,
+d.department_name, 
+a.apply_date, a.status
+FROM Applications a 
+JOIN Citizens ci ON ci.citizen_id = a.citizen_id 
+JOIN Services s ON s.service_id = a.service_id 
+JOIN Departments d ON d.department_id = s.department_id 
+ORDER BY a.apply_date DESC;
+
+-- J3: Department-wise complaint statistics 
+SELECT d.department_name,
+COUNT(c.complaint_id) AS total_complaints,
+SUM(CASE WHEN c.status = 'resolved' THEN 1 ELSE 0 END) AS resolved,
+SUM(CASE WHEN c.status NOT IN ('resolved','closed') THEN 1 ELSE 0 END) AS pending,
+ROUND(AVG((c.resolved_date - c.created_date)*24), 1) AS avg_resolution_hrs 
+FROM Departments d 
+LEFT JOIN Complaints c ON c.department_id = d.department_id 
+GROUP BY d.department_id, d.department_name 
+ORDER BY total_complaints DESC;
+
+-- J4: Complaint history with officer name and remarks 
+SELECT csh.history_id,
+c.title AS complaint,
+o.name AS updated_by, 
+csh.old_status, csh.new_status, csh.remarks, csh.update_time
+FROM Complaint_Status_History csh
+JOIN Complaints c ON c.complaint_id = csh.complaint_id 
+JOIN Officers o ON o.officer_id = csh.officer_id 
+ORDER BY csh.update_time DESC;
+
+-- J5: Citizen satisfaction report 
+SELECT f.feedback_id,
+ci.name AS citizen, 
+d.department_name,
+c.title AS complaint_title,
+f.rating, f.comment, f.feedback_date
+FROM Feedback f
+JOIN Complaints c ON c.complaint_id = f.complaint_id 
+JOIN Citizens ci ON ci.citizen_id = f.citizen_id 
+JOIN Departments d ON d.department_id = c.department_id 
+ORDER BY f.rating DESC;
+
+
+-- SECTION 7 : SUBQUERIES (all types)
+
+-- SQ1: Scalar subquery – citizens with more complaints than average 
+SELECT name, email,
+(SELECT COUNT(*) FROM Complaints WHERE citizen_id = c.citizen_id) AS my_complaints
+FROM Citizens c
+WHERE (SELECT COUNT(*) FROM Complaints WHERE citizen_id = c.citizen_id)
+> (SELECT AVG(cnt) FROM
+(SELECT COUNT(*) cnt FROM Complaints GROUP BY citizen_id));
+
+-- SQ2: IN subquery – complaints in departments with more than 1 complaint 
+SELECT complaint_id, title, status
+FROM Complaints
+WHERE department_id IN (SELECT department_id FROM Complaints
+GROUP BY department_id HAVING COUNT(*) > 1);
+
+-- SQ3: NOT IN subquery – citizens who never submitted a complaint 
+SELECT citizen_id, name, email
+FROM Citizens
+WHERE citizen_id NOT IN (
+SELECT DISTINCT citizen_id FROM Complaints
+);
+
+-- SQ4: EXISTS subquery – departments with at least one unresolved complaint 
+SELECT department_id, department_name
+FROM Departments d 
+WHERE EXISTS (
+SELECT 1 FROM Complaints c
+WHERE c.department_id = d.department_id
+AND c.status NOT IN ('resolved','closed')
+);
+
+-- SQ5: Correlated subquery – each complaint with its status-change count 
+SELECT complaint_id, title, status,
+(SELECT COUNT(*) FROM Complaint_Status_History h
+WHERE h.complaint_id = c.complaint_id) AS status_changes 
+FROM Complaints c
+ORDER BY status_changes DESC;
+
+-- SQ6: Derived table (inline view) – department with highest complaints 
+SELECT department_name, total
+FROM (
+SELECT d.department_name, COUNT(c.complaint_id) AS total 
+FROM Departments d
+JOIN Complaints c ON c.department_id = d.department_id 
+GROUP BY d.department_id, d.department_name
+) dept_stats 
+WHERE total = (
+SELECT MAX(cnt) FROM
+(SELECT COUNT(*) cnt FROM Complaints GROUP BY department_id)
+);
+
+-- SQ7: Subquery with ALL – non-low complaints after all low-priority ones 
+SELECT complaint_id, title, priority
+FROM Complaints
+WHERE priority != 'low' AND complaint_id > ALL (
+SELECT complaint_id FROM Complaints WHERE priority = 'low'
+);
+
+-- SQ8: Subquery for latest feedback date
+SELECT complaint_id, citizen_id, rating, comment 
+FROM Feedback
+WHERE feedback_date = (
+SELECT MAX(f2.feedback_date) FROM Feedback f2 
+WHERE f2.complaint_id = Feedback.complaint_id
+);
+
+
+-- SECTION 8 : VIEWS
+
+-- V1: Analytics summary view
+CREATE OR REPLACE VIEW v_analytics_summary AS 
+SELECT
+(SELECT COUNT(*) FROM Citizens) AS total_citizens,
+(SELECT COUNT(*) FROM Complaints) AS total_complaints, 
+(SELECT COUNT(*) FROM Complaints WHERE status NOT IN ('resolved','closed')) AS pending_complaints,
+(SELECT COUNT(*) FROM Complaints WHERE status = 'resolved') AS resolved_complaints,
+(SELECT COUNT(*) FROM Applications) AS total_applications,
+(SELECT ROUND(AVG((resolved_date - created_date)*24),1)
+FROM Complaints WHERE status = 'resolved') AS avg_resolution_hrs
+FROM DUAL;
+
+-- V2: Open complaints with full details 
+CREATE OR REPLACE VIEW v_open_complaints AS 
+SELECT c.complaint_id,
+ci.name AS citizen_name, ci.phone,
+d.department_name, c.title, c.priority, c.status, c.created_date,
+TRUNC(SYSDATE - c.created_date) AS age_days 
+FROM Complaints c
+JOIN Citizens ci ON ci.citizen_id = c.citizen_id 
+JOIN Departments d ON d.department_id = c.department_id 
+WHERE c.status NOT IN ('resolved','closed');
+
+-- V3: Monthly complaint trend
+CREATE OR REPLACE VIEW v_monthly_complaints AS 
+SELECT TO_CHAR(created_date,'YYYY') AS yr,
+TO_CHAR(created_date,'MM') AS mon, 
+TO_CHAR(created_date,'Month') AS month_name,
+COUNT(*) AS total,
+SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END) AS resolved, 
+SUM(CASE WHEN status NOT IN('resolved','closed') THEN 1 ELSE 0 END) AS pending
+FROM Complaints
+GROUP BY TO_CHAR(created_date,'YYYY'), TO_CHAR(created_date,'MM'), TO_CHAR(created_date,'Month');
+
+-- V4: Citizen feedback report
+CREATE OR REPLACE VIEW v_citizen_feedback AS 
+SELECT ci.name AS citizen,
+d.department_name, c.title,
+f.rating, f.comment, f.feedback_date
+FROM Feedback f
+JOIN Complaints c ON c.complaint_id = f.complaint_id
+JOIN Citizens ci ON ci.citizen_id = f.citizen_id 
+JOIN Departments d ON d.department_id = c.department_id;
+
+
+-- SECTION 9 : STORED PROCEDURES (PL/SQL)
+
+-- SP1: Submit a new complaint
+CREATE OR REPLACE PROCEDURE sp_submit_complaint ( 
+p_citizen_id IN NUMBER,
+p_dept_id IN NUMBER,
+p_title IN VARCHAR2, 
+p_description IN VARCHAR2, 
+p_priority IN VARCHAR2, 
+p_complaint_id OUT NUMBER
+) AS 
+BEGIN
+INSERT INTO Complaints
+(citizen_id, department_id, title, description, priority, status, created_date) 
+VALUES
+(p_citizen_id, p_dept_id, p_title, p_description, p_priority, 'submitted', SYSDATE)
+RETURNING complaint_id INTO p_complaint_id; 
+COMMIT;
+DBMS_OUTPUT.PUT_LINE('New complaint ID: ' || p_complaint_id); 
+END sp_submit_complaint;
+/
+
+-- SP2: Update complaint status with automatic history logging 
+CREATE OR REPLACE PROCEDURE sp_update_complaint_status (
+p_complaint_id IN NUMBER, 
+p_officer_id IN NUMBER, 
+p_new_status IN VARCHAR2, 
+p_remarks IN VARCHAR2
+) AS
+v_old_status VARCHAR2(50); 
+BEGIN
+SELECT status INTO v_old_status FROM Complaints
+WHERE complaint_id = p_complaint_id;
+
+UPDATE Complaints
+SET status = p_new_status, 
+resolved_date = CASE
+WHEN p_new_status = 'resolved' THEN SYSDATE 
+ELSE resolved_date
+END
+WHERE complaint_id = p_complaint_id;
+
+INSERT INTO Complaint_Status_History
+(complaint_id, officer_id, old_status, new_status, remarks, update_time) 
+VALUES
+(p_complaint_id, p_officer_id, v_old_status, p_new_status, p_remarks, SYSDATE);
+
+COMMIT;
+DBMS_OUTPUT.PUT_LINE('Status updated: ' || v_old_status || ' -> ' || p_new_status);
+
+EXCEPTION
+WHEN NO_DATA_FOUND THEN
+DBMS_OUTPUT.PUT_LINE('ERROR: Complaint ID ' || p_complaint_id || ' not found.');
+WHEN OTHERS THEN 
+ROLLBACK;
+DBMS_OUTPUT.PUT_LINE('ERROR: ' || SQLERRM);
+END sp_update_complaint_status;
+/
+
+-- SP3: Department performance report (prints via DBMS_OUTPUT) 
+CREATE OR REPLACE PROCEDURE sp_dept_performance_report AS
+CURSOR c_dept IS
+SELECT d.department_name,
+COUNT(c.complaint_id) AS total,
+SUM(CASE WHEN c.status='resolved' THEN 1 ELSE 0 END) AS resolved,
+SUM(CASE WHEN c.status NOT IN('resolved','closed') THEN 1 ELSE 0 END) AS open_cnt,
+ROUND(AVG((c.resolved_date - c.created_date)*24), 1) AS avg_hrs
+FROM Departments d
+LEFT JOIN Complaints c ON c.department_id = d.department_id 
+GROUP BY d.department_id, d.department_name
+ORDER BY total DESC;
+
+BEGIN
+DBMS_OUTPUT.PUT_LINE(RPAD('Department',35) || LPAD('Total',7)
+|| LPAD('Resolved',10) || LPAD('Open',7) || LPAD('Avg Hrs',9)); 
+DBMS_OUTPUT.PUT_LINE(RPAD('-',68,'-'));
+FOR r IN c_dept LOOP 
+DBMS_OUTPUT.PUT_LINE(
+RPAD(r.department_name,35)
+|| LPAD(NVL(TO_CHAR(r.total),'0'),7)
+|| LPAD(NVL(TO_CHAR(r.resolved),'0'),10)
+|| LPAD(NVL(TO_CHAR(r.open_cnt),'0'),7)
+|| LPAD(NVL(TO_CHAR(r.avg_hrs),'N/A'),9)); 
+END LOOP;
+END sp_dept_performance_report;
+/
+
+
+-- SECTION 10 : FUNCTIONS (PL/SQL)
+
+-- FN1: Total complaints for a given citizen
+CREATE OR REPLACE FUNCTION fn_citizen_complaint_count ( 
+p_citizen_id IN NUMBER
+) RETURN NUMBER IS
+v_count NUMBER; 
+BEGIN
+SELECT COUNT(*) INTO v_count FROM Complaints
+WHERE citizen_id = p_citizen_id; 
+RETURN v_count;
+END fn_citizen_complaint_count;
+/
+
+-- FN2: Resolution time in hours (-1 if not yet resolved) 
+CREATE OR REPLACE FUNCTION fn_resolution_hours (
+p_complaint_id IN NUMBER
+) RETURN NUMBER IS
+v_created DATE; 
+v_resolved DATE;
+BEGIN
+SELECT created_date, resolved_date INTO v_created, v_resolved
+FROM Complaints
+WHERE complaint_id = p_complaint_id;
+
+IF v_resolved IS NULL THEN 
+RETURN -1;
+END IF;
+RETURN ROUND((v_resolved - v_created) * 24, 2); 
+EXCEPTION
+WHEN NO_DATA_FOUND THEN 
+RETURN -2;
+END fn_resolution_hours;
+/
+
+-- FN3: Human-readable status label
+CREATE OR REPLACE FUNCTION fn_status_label ( 
+p_status IN VARCHAR2
+) RETURN VARCHAR2 IS 
+BEGIN
+RETURN CASE p_status
+WHEN 'submitted' THEN '[SUBMITTED] Submitted' 
+WHEN 'assigned' THEN '[ASSIGNED] Assigned' 
+WHEN 'in_progress' THEN '[PROGRESS] In Progress' 
+WHEN 'resolved' THEN '[RESOLVED] Resolved' 
+WHEN 'closed' THEN '[CLOSED] Closed'
+WHEN 'rejected' THEN '[REJECTED] Rejected' 
+ELSE '[UNKNOWN] ' || p_status
+END;
+END fn_status_label;
+/
+
+
+-- SECTION 11 : TRIGGERS (Business-Logic)
+
+-- T3: BEFORE INSERT on Complaints
+-- Auto-escalate priority to 'critical' for emergency keywords 
+CREATE OR REPLACE TRIGGER trg_complaint_priority_check
+BEFORE INSERT ON Complaints FOR EACH ROW
+BEGIN
+IF LOWER(:NEW.title) LIKE '%fire%'
+OR LOWER(:NEW.title) LIKE '%explosion%' 
+OR LOWER(:NEW.title) LIKE '%flood%'
+OR LOWER(:NEW.title) LIKE '%collapse%' THEN
+:NEW.priority := 'critical'; 
+END IF;
+END trg_complaint_priority_check;
+/
+
+-- T4: BEFORE UPDATE on Complaints
+-- Automatically set resolved_date when status changes to 'resolved' 
+CREATE OR REPLACE TRIGGER trg_set_resolved_date
+BEFORE UPDATE OF status ON Complaints FOR EACH ROW
+BEGIN
+IF :NEW.status = 'resolved' AND :OLD.status != 'resolved' THEN
+:NEW.resolved_date := SYSDATE; 
+END IF;
+END trg_set_resolved_date;
+/
+
+-- T5: AFTER INSERT on Feedback
+-- Close the complaint once citizen submits feedback on a resolved case 
+CREATE OR REPLACE TRIGGER trg_feedback_audit
+AFTER INSERT ON Feedback FOR EACH ROW
+BEGIN
+UPDATE Complaints
+SET status = 'closed'
+WHERE complaint_id = :NEW.complaint_id AND status = 'resolved';
+END trg_feedback_audit;
+/
+
+
+-- SECTION 12 : ADVANCED QUERIES
+
+
+-- AQ1: Department with the highest number of complaints 
+SELECT department_name, complaint_count
+FROM (
+SELECT d.department_name, COUNT(*) AS complaint_count 
+FROM Complaints c
+JOIN Departments d ON d.department_id = c.department_id 
+GROUP BY d.department_name
+ORDER BY complaint_count DESC
+)
+WHERE ROWNUM = 1;
+
+-- AQ2: Unresolved complaints older than 7 days (overdue report) 
+SELECT c.complaint_id,
+ci.name AS citizen_name,
+d.department_name, c.title, c.priority,
+TRUNC(SYSDATE - c.created_date) AS overdue_days 
+FROM Complaints c
+JOIN Citizens ci ON ci.citizen_id = c.citizen_id 
+JOIN Departments d ON d.department_id = c.department_id 
+WHERE c.status NOT IN ('resolved','closed')
+AND SYSDATE - c.created_date > 7 
+ORDER BY overdue_days DESC;
+
+-- AQ3: Full complaint timeline for citizen_id = 1 
+SELECT c.complaint_id, c.title, c.priority, c.status,
+c.created_date, c.resolved_date, f.rating 
+FROM Complaints c
+LEFT JOIN Feedback f ON f.complaint_id = c.complaint_id 
+WHERE c.citizen_id = 1
+ORDER BY c.created_date;
+
+-- AQ4: Average resolution time per department (hours) 
+SELECT d.department_name,
+ROUND(AVG((c.resolved_date - c.created_date)*24), 1) AS avg_resolution_hours, 
+COUNT(*) AS resolved_count
+FROM Complaints c
+JOIN Departments d ON d.department_id = c.department_id 
+WHERE c.status = 'resolved'
+GROUP BY d.department_id, d.department_name 
+ORDER BY avg_resolution_hours;
+
+-- AQ5: Monthly complaint report for year 2025
+SELECT TO_CHAR(created_date,'Month') AS month_name,
+COUNT(*) AS total,
+SUM(CASE WHEN status='resolved' THEN 1 ELSE 0 END) AS resolved, 
+SUM(CASE WHEN status NOT IN('resolved','closed') THEN 1 ELSE 0 END) AS pending, 
+ROUND(AVG(CASE WHEN status='resolved'
+THEN (resolved_date - created_date)*24 END), 1) AS avg_hrs 
+FROM Complaints
+WHERE TO_CHAR(created_date,'YYYY') = '2025'
+GROUP BY TO_CHAR(created_date,'MM'), TO_CHAR(created_date,'Month') 
+ORDER BY TO_CHAR(created_date,'MM');
+
+
+-- SECTION 13 : DEMO / VERIFICATION SELECTS
+
+-- Verify analytics summary
+SELECT * FROM v_analytics_summary;
+
+-- Open complaints ordered by age
+SELECT * FROM v_open_complaints ORDER BY age_days DESC;
+
+-- Monthly trend
+SELECT * FROM v_monthly_complaints ORDER BY yr, mon;
+
+-- Citizen satisfaction
+SELECT * FROM v_citizen_feedback;
+
+-- Test function: complaint count for citizen 1
+SELECT fn_citizen_complaint_count(1) AS complaints_by_citizen_1 FROM DUAL;
+
+-- Test function: resolution hours for complaint 1
+SELECT fn_resolution_hours(1) AS resolution_hours FROM DUAL;
+
+-- Test function: status label
+SELECT fn_status_label('in_progress') AS label FROM DUAL;
+
+-- Run procedure: performance report
+-- (enable DBMS_OUTPUT in SQL*Plus first: SET SERVEROUTPUT ON) 
+EXEC sp_dept_performance_report;
+
+
+-- THE END 
