@@ -135,7 +135,7 @@ This minimizes redundancy and ensures data consistency.
 
 ---
 
-## 🛠 Technologies Used
+##  Technologies Used
 
 - Oracle Database 10g Express Edition
 - SQL
